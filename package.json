@@ -3,15 +3,17 @@
   "displayName": "Polyglot Project Explorer",
   "description": "Browse Go and C# projects without changing the workspace folders.",
   "publisher": "tanding0304",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "engines": { "vscode": "^1.85.0" },
   "main": "./extension.js",
   "repository": { "type": "git", "url": "https://github.com/tanding0304/vscode-polyglot-project-explorer" },
   "scripts": { "test": "node --check extension.js" },
   "contributes": {
+    "viewsWelcome": [{ "view": "polyglotProjects.tree", "contents": "在工作区根目录添加 polyglot-projects.json，并在 projects 数组中列出工程文件路径。" }],
     "viewsContainers": { "activitybar": [{ "id": "polyglotProjects", "title": "工程", "icon": "projects.svg" }] },
     "views": { "polyglotProjects": [{ "id": "polyglotProjects.tree", "name": "Go / C# 工程" }] },
     "commands": [
+      { "command": "polyglotProjects.runCode", "title": "Run Code" },
       { "command": "polyglotProjects.refresh", "title": "刷新工程", "icon": "$(refresh)" },
       { "command": "polyglotProjects.run", "title": "运行启动配置" },
       { "command": "polyglotProjects.debug", "title": "调试启动配置" }
@@ -19,8 +21,9 @@
     "menus": {
       "view/title": [{ "command": "polyglotProjects.refresh", "when": "view == polyglotProjects.tree", "group": "navigation" }],
       "view/item/context": [
-        { "command": "polyglotProjects.run", "when": "view == polyglotProjects.tree && viewItem == polyglotProject" },
-        { "command": "polyglotProjects.debug", "when": "view == polyglotProjects.tree && viewItem == polyglotProject" }
+        { "command": "polyglotProjects.runCode", "when": "view == polyglotProjects.tree && (viewItem == polyglotGoMain || viewItem == polyglotSource)" },
+        { "command": "polyglotProjects.run", "when": "view == polyglotProjects.tree && (viewItem == polyglotProject || viewItem == polyglotGoMain)" },
+        { "command": "polyglotProjects.debug", "when": "view == polyglotProjects.tree && (viewItem == polyglotProject || viewItem == polyglotGoMain)" }
       ]
     }
   }

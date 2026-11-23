@@ -15,14 +15,15 @@
   "projects": ["server/go.mod", "Battle/Server.sln"],
   "launch": {
     "server/go.mod": "Go: Server",
-    "Battle/Server/Server.csproj": "C#: Server"
+    "Battle/Server.sln": ["C#: local_game", "C#: local_battle"],
+    "Battle/Server/Server.csproj": ["C#: local_game", "C#: local_battle"]
   }
 }
 ```
 
-键是相对于工作区根目录的 `go.mod` 或 `.csproj` 路径（包括解决方案展开后显示的 C# 工程），值必须和所属工作区 `.vscode/launch.json` 中启动配置的 `name` 一致。保存后点击工程视图右上角的刷新按钮。
+键是相对于工作区根目录的 `go.mod`、`.sln` / `.slnx` 或 `.csproj` 路径，值可以是单个启动配置 `name` 或名称数组（需与所属工作区 `.vscode/launch.json` 中一致）。保存后点击工程视图右上角的刷新按钮。
 
-绑定有效时，右键运行或调试会直接启动；未绑定时仍可手动选择，配置名称找不到时会先提示再回到选择流程。右键 `main.go` 仍使用原有的 Go 快速启动方式。
+绑定单个配置时，右键运行或调试会直接启动；绑定多个配置时，只弹出这几个配置供选择；未绑定时仍列出全部启动配置，配置名称找不到时会先提示再回到选择流程。右键 `main.go` 仍使用原有的 Go 快速启动方式。
 
 ## 本地安装
 

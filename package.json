@@ -3,7 +3,7 @@
   "displayName": "Polyglot Project Explorer",
   "description": "Browse Go and C# projects without changing the workspace folders.",
   "publisher": "tanding0304",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "engines": { "vscode": "^1.85.0" },
   "main": "./extension.js",
   "repository": { "type": "git", "url": "https://github.com/tanding0304/vscode-polyglot-project-explorer" },

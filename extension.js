@@ -22,6 +22,12 @@ function isProjectPath(entry) {
     /(?:^|\/)go\.mod$|\.(?:slnx?|csproj)$/.test(entry);
 }
 
+function normalizeLaunchNames(value) {
+  if (typeof value === 'string' && value.trim()) return [value];
+  if (Array.isArray(value) && value.length && value.every(name => typeof name === 'string' && name.trim())) return value;
+  return null;
+}
+
 async function children(item) {
   if (item?.projects) return item.projects;
   if (item) {
@@ -43,11 +49,13 @@ async function children(item) {
         markers.push(vscode.Uri.joinPath(workspace.uri, entry));
       }
       const bindings = launch && typeof launch === 'object' && !Array.isArray(launch) && Object.entries(launch);
-      if (!bindings || !bindings.every(([entry, name]) => isProjectPath(entry) && typeof name === 'string' && name.trim())) {
-        throw new Error('launch 必须是工程相对路径到启动配置名称的映射');
-      }
-      for (const [entry, name] of bindings) {
-        launchNames.set(vscode.Uri.joinPath(workspace.uri, entry).toString(), name);
+      if (!bindings) throw new Error('launch 必须是工程相对路径到启动配置名称的映射');
+      for (const [entry, value] of bindings) {
+        const names = normalizeLaunchNames(value);
+        if (!isProjectPath(entry) || !names) {
+          throw new Error('launch 必须是工程相对路径到启动配置名称或名称数组的映射');
+        }
+        launchNames.set(vscode.Uri.joinPath(workspace.uri, entry).toString(), names);
       }
     } catch (error) {
       if (error.code !== 'FileNotFound') vscode.window.showErrorMessage(`${workspace.name}/polyglot-projects.json：${error.message}`);
@@ -64,7 +72,8 @@ async function children(item) {
     const label = name === 'go.mod' ? path.basename(folder.path) : name;
     const item = node(folder, true, label, suffix !== '.sln' && suffix !== '.slnx');
     item.id = marker.toString();
-    item.launchName = launchNames.get(item.id);
+    item.launchNames = launchNames.get(item.id);
+    if (item.launchNames && !item.contextValue) item.contextValue = 'polyglotProject';
     item.tooltip = vscode.workspace.asRelativePath(marker, true);
     if (name === 'go.mod') {
       const workspace = vscode.workspace.getWorkspaceFolder(marker);
@@ -105,7 +114,7 @@ async function children(item) {
       grouped.add(key);
       const child = node(project.uri, true, project.label, true);
       child.id = `${item.id}#${key}`;
-      child.launchName = launchNames.get(key);
+      child.launchNames = launchNames.get(key);
       child.iconPath = new vscode.ThemeIcon('file-code');
       child.tooltip = vscode.workspace.asRelativePath(projectUri, true);
       item.projects.push(child);
@@ -135,15 +144,20 @@ async function launch(item, noDebug) {
   }
   const configs = vscode.workspace.getConfiguration('launch', item.uri).get('configurations', []);
   const launchConfigs = configs.filter(config => config.request === 'launch' && config.name);
-  if (item.launchName) {
-    const config = launchConfigs.find(config => config.name === item.launchName);
-    if (config) {
-      await vscode.debug.startDebugging(folder, config, { noDebug });
+  let targetConfigs = launchConfigs;
+  if (item.launchNames) {
+    const matched = item.launchNames.map(name => launchConfigs.find(config => config.name === name)).filter(Boolean);
+    if (matched.length === 1) {
+      await vscode.debug.startDebugging(folder, matched[0], { noDebug });
       return;
     }
-    void vscode.window.showWarningMessage(`找不到启动配置「${item.launchName}」，请检查 polyglot-projects.json 中的绑定。`);
+    if (matched.length > 1) {
+      targetConfigs = matched;
+    } else {
+      void vscode.window.showWarningMessage(`找不到启动配置「${item.launchNames.join(' / ')}」，请检查 polyglot-projects.json 中的绑定。`);
+    }
   }
-  const choices = launchConfigs.map(config => ({ label: config.name, description: config.type, config }));
+  const choices = targetConfigs.map(config => ({ label: config.name, description: config.type, config }));
   if (!choices.length) {
     await vscode.window.showInformationMessage('当前工作区没有启动配置，请先在「运行和调试」中添加。');
     return;

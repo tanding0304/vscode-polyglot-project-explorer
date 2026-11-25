@@ -1,6 +1,12 @@
 const vscode = require('vscode');
 const path = require('node:path').posix;
 const { TextDecoder } = require('node:util');
+const {
+  parseSln,
+  parseSlnx,
+  buildSolutionTreeNodes,
+  buildCsprojDependenciesNode
+} = require('./csharp-solution');
 
 const ignored = new Set(['.git', '.gocache', '.gomodcache', 'node_modules', 'vendor', 'bin', 'obj']);
 
@@ -13,7 +19,7 @@ function node(uri, directory, label, project = false) {
   if (!directory) item.command = { command: 'vscode.open', title: '打开文件', arguments: [uri] };
   if (project) item.contextValue = 'polyglotProject';
   if (!directory && path.basename(uri.path) === 'main.go') item.contextValue = 'polyglotGoMain';
-  else if (!directory && /\.(go|cs)$/.test(uri.path)) item.contextValue = 'polyglotSource';
+  else if (!directory) item.contextValue = 'polyglotSource';
   return item;
 }
 
@@ -32,9 +38,14 @@ async function children(item) {
   if (item?.projects) return item.projects;
   if (item) {
     const entries = await vscode.workspace.fs.readDirectory(item.uri);
-    return entries.filter(([name, type]) => !ignored.has(name) && !(type & vscode.FileType.SymbolicLink))
+    const fsChildren = entries.filter(([name, type]) => !ignored.has(name) && !(type & vscode.FileType.SymbolicLink))
       .map(([name, type]) => node(vscode.Uri.joinPath(item.uri, name), Boolean(type & vscode.FileType.Directory)))
       .sort((left, right) => right.collapsibleState - left.collapsibleState || left.label.localeCompare(right.label));
+    if (item.csprojUri) {
+      const depsNode = await buildCsprojDependenciesNode(item.csprojUri, item.id);
+      if (depsNode) return [depsNode, ...fsChildren];
+    }
+    return fsChildren;
   }
   const markers = [];
   const launchNames = new Map();
@@ -91,6 +102,7 @@ async function children(item) {
       }
     }
     if (suffix === '.csproj') {
+      item.csprojUri = marker;
       item.iconPath = new vscode.ThemeIcon('file-code');
       projects.set(item.id, item);
     } else {
@@ -101,24 +113,13 @@ async function children(item) {
   const grouped = new Set();
   await Promise.all(solutions.map(async ({ marker, item, suffix }) => {
     const source = new TextDecoder().decode(await vscode.workspace.fs.readFile(marker));
-    const references = suffix === '.sln'
-      ? source.matchAll(/^Project\("[^"]+"\)\s*=\s*"[^"]+",\s*"([^"]+\.csproj)"/gim)
-      : source.matchAll(/<Project\b[^>]*\bPath\s*=\s*["']([^"']+\.csproj)["']/gi);
+    const parsed = suffix === '.sln' ? parseSln(source) : parseSlnx(source);
     item.iconPath = new vscode.ThemeIcon('project');
-    item.projects = [];
-    for (const [, reference] of references) {
-      const projectUri = vscode.Uri.joinPath(item.uri, reference.replace(/\\/g, '/'));
-      const key = projectUri.toString();
-      const project = projects.get(key) ?? node(projectUri.with({ path: path.dirname(projectUri.path) }), true, path.basename(projectUri.path), true);
-      if (item.projects.some(child => child.id === `${item.id}#${key}`)) continue;
-      grouped.add(key);
-      const child = node(project.uri, true, project.label, true);
-      child.id = `${item.id}#${key}`;
-      child.launchNames = launchNames.get(key);
-      child.iconPath = new vscode.ThemeIcon('file-code');
-      child.tooltip = vscode.workspace.asRelativePath(projectUri, true);
-      item.projects.push(child);
-    }
+    item.projects = buildSolutionTreeNodes(parsed, item.uri, item.id, {
+      makeNode: node,
+      launchNames,
+      groupedProjects: grouped
+    });
     if (!item.projects.length) delete item.projects;
   }));
   roots.push(...[...projects.values()].filter(project => !grouped.has(project.id)));

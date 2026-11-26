@@ -28,6 +28,7 @@ function node(uri, directory, label, project = false) {
   if (!directory) item.command = { command: 'vscode.open', title: '打开文件', arguments: [uri] };
   if (project) item.contextValue = 'polyglotProject';
   if (!directory && path.basename(uri.path) === 'main.go') item.contextValue = 'polyglotGoMain';
+  else if (!directory && path.basename(uri.path) === 'go.mod') item.contextValue = 'polyglotGoModFile';
   else if (!directory && uri.path.endsWith('_test.go')) item.contextValue = 'polyglotGoTest';
   else if (!directory) item.contextValue = 'polyglotSource';
   return item;
@@ -281,7 +282,11 @@ function activate(context) {
     vscode.commands.registerCommand('polyglotProjects.goTest', item => runGo(item, 'test ./...')),
     vscode.commands.registerCommand('polyglotProjects.goTestPkg', item => runGo(item, 'test -v .')),
     vscode.commands.registerCommand('polyglotProjects.goVet', item => runGo(item, 'vet ./...')),
-    vscode.commands.registerCommand('polyglotProjects.goModTidy', item => runGo(item, 'mod tidy')));
+    vscode.commands.registerCommand('polyglotProjects.goModTidy', item => runGo(item, 'mod tidy')),
+    vscode.commands.registerCommand('polyglotProjects.goModDownload', item => runGo(item, 'mod download')),
+    vscode.commands.registerCommand('polyglotProjects.goModVerify', item => runGo(item, 'mod verify')),
+    vscode.commands.registerCommand('polyglotProjects.goModVendor', item => runGo(item, 'mod vendor')),
+    vscode.commands.registerCommand('polyglotProjects.goModGraph', item => runGo(item, 'mod graph')));
 }
 
 module.exports = { activate };

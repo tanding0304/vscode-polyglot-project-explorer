@@ -11,7 +11,7 @@
   "contributes": {
     "viewsWelcome": [{ "view": "polyglotProjects.tree", "contents": "在工作区根目录添加 polyglot-projects.json，并在 projects 数组中列出工程文件路径。" }],
     "viewsContainers": { "activitybar": [{ "id": "polyglotProjects", "title": "工程", "icon": "projects.svg" }] },
-    "views": { "polyglotProjects": [{ "id": "polyglotProjects.tree", "name": "Go / C# 工程" }] },
+    "views": { "polyglotProjects": [{ "id": "polyglotProjects.tree", "name": "工程" }] },
     "commands": [
       { "command": "polyglotProjects.runCode", "title": "Run Code" },
       { "command": "polyglotProjects.refresh", "title": "刷新工程", "icon": "$(refresh)" },
@@ -27,7 +27,11 @@
       { "command": "polyglotProjects.goTest", "title": "Go: Test (go test ./...)" },
       { "command": "polyglotProjects.goTestPkg", "title": "Go: 运行当前包测试 (go test -v .)" },
       { "command": "polyglotProjects.goVet", "title": "Go: Vet (go vet ./...)" },
-      { "command": "polyglotProjects.goModTidy", "title": "Go: Mod Tidy (go mod tidy)" }
+      { "command": "polyglotProjects.goModTidy", "title": "Go: Mod Tidy (go mod tidy)" },
+      { "command": "polyglotProjects.goModDownload", "title": "Go: Mod Download (go mod download)" },
+      { "command": "polyglotProjects.goModVerify", "title": "Go: Mod Verify (go mod verify)" },
+      { "command": "polyglotProjects.goModVendor", "title": "Go: Mod Vendor (go mod vendor)" },
+      { "command": "polyglotProjects.goModGraph", "title": "Go: Mod Graph (go mod graph)" }
     ],
     "menus": {
       "view/title": [{ "command": "polyglotProjects.refresh", "when": "view == polyglotProjects.tree", "group": "navigation" }],
@@ -38,7 +42,11 @@
         { "command": "polyglotProjects.goBuild", "when": "view == polyglotProjects.tree && viewItem == polyglotGoModule", "group": "go@1" },
         { "command": "polyglotProjects.goTest", "when": "view == polyglotProjects.tree && viewItem == polyglotGoModule", "group": "go@2" },
         { "command": "polyglotProjects.goVet", "when": "view == polyglotProjects.tree && viewItem == polyglotGoModule", "group": "go@3" },
-        { "command": "polyglotProjects.goModTidy", "when": "view == polyglotProjects.tree && viewItem == polyglotGoModule", "group": "go@4" },
+        { "command": "polyglotProjects.goModTidy", "when": "view == polyglotProjects.tree && (viewItem == polyglotGoModule || viewItem == polyglotGoModFile)", "group": "gomod@1" },
+        { "command": "polyglotProjects.goModDownload", "when": "view == polyglotProjects.tree && (viewItem == polyglotGoModule || viewItem == polyglotGoModFile)", "group": "gomod@2" },
+        { "command": "polyglotProjects.goModVerify", "when": "view == polyglotProjects.tree && viewItem == polyglotGoModFile", "group": "gomod@3" },
+        { "command": "polyglotProjects.goModVendor", "when": "view == polyglotProjects.tree && viewItem == polyglotGoModFile", "group": "gomod@4" },
+        { "command": "polyglotProjects.goModGraph", "when": "view == polyglotProjects.tree && viewItem == polyglotGoModFile", "group": "gomod@5" },
         { "command": "polyglotProjects.goTestPkg", "when": "view == polyglotProjects.tree && viewItem == polyglotGoTest", "group": "go@1" },
         { "command": "polyglotProjects.dotnetBuild", "when": "view == polyglotProjects.tree && (viewItem == polyglotCsharpSolution || viewItem == polyglotCsharpProject)", "group": "dotnet@1" },
         { "command": "polyglotProjects.dotnetRebuild", "when": "view == polyglotProjects.tree && (viewItem == polyglotCsharpSolution || viewItem == polyglotCsharpProject)", "group": "dotnet@2" },

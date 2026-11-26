@@ -2,8 +2,40 @@
 // Copyright (c) Fernando Escolar
 
 const vscode = require('vscode');
-const path = require('node:path').posix;
+const nodePath = require('node:path');
+const path = nodePath.posix;
 const { TextDecoder } = require('node:util');
+
+const ICONS_DIR = nodePath.join(__dirname, 'icons');
+
+function icon(lightName, darkName) {
+  const light = vscode.Uri.file(nodePath.join(ICONS_DIR, lightName));
+  if (!darkName) return light;
+  return { light, dark: vscode.Uri.file(nodePath.join(ICONS_DIR, darkName)) };
+}
+
+function projectIconFor(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.fsproj') return icon('fsproj.svg');
+  if (ext === '.vbproj') return icon('vbproj.svg');
+  return icon('csproj.svg');
+}
+
+function fileIconFor(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.cs': return icon('cs.svg');
+    case '.fs': return icon('fs.svg');
+    case '.vb': return icon('vb.svg');
+    case '.cshtml': return icon('cshtml.svg');
+    case '.csproj': return icon('csproj.svg');
+    case '.fsproj': return icon('fsproj.svg');
+    case '.vbproj': return icon('vbproj.svg');
+    case '.sln':
+    case '.slnx': return icon('sln.svg');
+    default: return null;
+  }
+}
 
 const SOLUTION_FOLDER_GUID = '{2150E333-8FDC-42A3-9474-1A3956D46DE8}';
 const decoder = new TextDecoder();
@@ -168,19 +200,19 @@ function parseCsprojDependencies(content) {
   return { packages, projects, assemblies };
 }
 
-function createInfoItem(id, label, iconName, description = '') {
+function createInfoItem(id, label, iconPath, description = '') {
   const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
   item.id = id;
-  item.iconPath = new vscode.ThemeIcon(iconName);
+  item.iconPath = iconPath;
   if (description) item.description = description;
   item.contextValue = 'polyglotDependency';
   return item;
 }
 
-function createGroupItem(id, label, iconName, children) {
+function createGroupItem(id, label, iconPath, children) {
   const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
   item.id = id;
-  item.iconPath = new vscode.ThemeIcon(iconName);
+  item.iconPath = iconPath;
   item.projects = children;
   item.contextValue = 'polyglotDependencyGroup';
   return item;
@@ -195,8 +227,8 @@ async function buildCsprojDependenciesNode(csprojUri, parentId) {
     if (packages.length) {
       const pkgItems = packages
         .sort((a, b) => a.name.localeCompare(b.name))
-        .map(pkg => createInfoItem(`${parentId}#pkg:${pkg.name}`, pkg.name, 'package', pkg.version));
-      groups.push(createGroupItem(`${parentId}#packages`, 'Packages', 'package', pkgItems));
+        .map(pkg => createInfoItem(`${parentId}#pkg:${pkg.name}`, pkg.name, icon('PackageReference.svg', 'PackageReference-dark.svg'), pkg.version));
+      groups.push(createGroupItem(`${parentId}#packages`, 'Packages', icon('packages.svg'), pkgItems));
     }
 
     if (projects.length) {
@@ -209,24 +241,24 @@ async function buildCsprojDependenciesNode(csprojUri, parentId) {
           item.id = `${parentId}#projref:${ref}`;
           item.uri = targetUri;
           item.resourceUri = targetUri;
-          item.iconPath = new vscode.ThemeIcon('file-code');
+          item.iconPath = icon('referenced-project.svg');
           item.tooltip = vscode.workspace.asRelativePath(targetUri, true);
           item.command = { command: 'vscode.open', title: '打开文件', arguments: [targetUri] };
           item.contextValue = 'polyglotDependency';
           return item;
         });
-      groups.push(createGroupItem(`${parentId}#projects`, 'Projects', 'references', projItems));
+      groups.push(createGroupItem(`${parentId}#projects`, 'Projects', icon('references.svg'), projItems));
     }
 
     if (assemblies.length) {
       const asmItems = assemblies
         .sort((a, b) => a.localeCompare(b))
-        .map(asm => createInfoItem(`${parentId}#asm:${asm}`, asm, 'library'));
-      groups.push(createGroupItem(`${parentId}#assemblies`, 'Assemblies', 'library', asmItems));
+        .map(asm => createInfoItem(`${parentId}#asm:${asm}`, asm, icon('Application.svg', 'Application-dark.svg')));
+      groups.push(createGroupItem(`${parentId}#assemblies`, 'Assemblies', icon('Application.svg', 'Application-dark.svg'), asmItems));
     }
 
     if (!groups.length) return null;
-    return createGroupItem(`${parentId}#dependencies`, 'Dependencies', 'symbol-module', groups);
+    return createGroupItem(`${parentId}#dependencies`, 'Dependencies', icon('ReferenceGroup.svg', 'ReferenceGroup-dark.svg'), groups);
   } catch {
     return null;
   }
@@ -238,7 +270,7 @@ function buildSolutionTreeNodes(nodes, solutionDirUri, solutionId, { makeNode, l
     if (entry.isFolder) {
       const folderItem = new vscode.TreeItem(entry.name, vscode.TreeItemCollapsibleState.Collapsed);
       folderItem.id = `${solutionId}#folder:${entry.id}`;
-      folderItem.iconPath = vscode.ThemeIcon.Folder;
+      folderItem.iconPath = icon('folder.svg');
       folderItem.contextValue = 'polyglotSolutionFolder';
 
       const subChildren = buildSolutionTreeNodes(entry.children, solutionDirUri, solutionId, {
@@ -259,11 +291,13 @@ function buildSolutionTreeNodes(nodes, solutionDirUri, solutionId, { makeNode, l
       groupedProjects.add(key);
 
       const projectDir = projectUri.with({ path: path.dirname(projectUri.path) });
-      const child = makeNode(projectDir, true, path.basename(entry.path), true);
+      const projectName = path.basename(entry.path, path.extname(entry.path));
+      const child = makeNode(projectDir, true, projectName, true);
       child.id = `${solutionId}#${key}`;
       child.csprojUri = projectUri;
+      child.contextValue = 'polyglotCsharpProject';
       child.launchNames = launchNames.get(key);
-      child.iconPath = new vscode.ThemeIcon('file-code');
+      child.iconPath = projectIconFor(entry.path);
       child.tooltip = vscode.workspace.asRelativePath(projectUri, true);
       result.push(child);
     }
@@ -278,6 +312,8 @@ function buildSolutionTreeNodes(nodes, solutionDirUri, solutionId, { makeNode, l
 }
 
 module.exports = {
+  icon,
+  fileIconFor,
   parseSln,
   parseSlnx,
   buildSolutionTreeNodes,

@@ -1,12 +1,21 @@
 const vscode = require('vscode');
-const path = require('node:path').posix;
+const nodePath = require('node:path');
+const path = nodePath.posix;
 const { TextDecoder } = require('node:util');
 const {
+  icon,
+  fileIconFor,
   parseSln,
   parseSlnx,
   buildSolutionTreeNodes,
   buildCsprojDependenciesNode
 } = require('./csharp-solution');
+const {
+  goFileIconFor,
+  readGoModInfo,
+  formatGoModuleDescription,
+  buildGoExternalLibrariesNode
+} = require('./go-module');
 
 const ignored = new Set(['.git', '.gocache', '.gomodcache', 'node_modules', 'vendor', 'bin', 'obj']);
 
@@ -15,10 +24,11 @@ function node(uri, directory, label, project = false) {
     ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
   item.uri = uri;
   item.resourceUri = uri;
-  item.iconPath = directory ? vscode.ThemeIcon.Folder : vscode.ThemeIcon.File;
+  item.iconPath = directory ? vscode.ThemeIcon.Folder : (goFileIconFor(uri.path) ?? fileIconFor(uri.path) ?? vscode.ThemeIcon.File);
   if (!directory) item.command = { command: 'vscode.open', title: '打开文件', arguments: [uri] };
   if (project) item.contextValue = 'polyglotProject';
   if (!directory && path.basename(uri.path) === 'main.go') item.contextValue = 'polyglotGoMain';
+  else if (!directory && uri.path.endsWith('_test.go')) item.contextValue = 'polyglotGoTest';
   else if (!directory) item.contextValue = 'polyglotSource';
   return item;
 }
@@ -39,11 +49,26 @@ async function children(item) {
   if (item) {
     const entries = await vscode.workspace.fs.readDirectory(item.uri);
     const fsChildren = entries.filter(([name, type]) => !ignored.has(name) && !(type & vscode.FileType.SymbolicLink))
-      .map(([name, type]) => node(vscode.Uri.joinPath(item.uri, name), Boolean(type & vscode.FileType.Directory)))
+      .map(([name, type]) => {
+        const isDir = Boolean(type & vscode.FileType.Directory);
+        const child = node(vscode.Uri.joinPath(item.uri, name), isDir);
+        if (isDir && (item.csprojUri || item.isCsharpDir)) {
+          child.isCsharpDir = true;
+          child.iconPath = icon('folder.svg');
+        } else if (isDir && (item.goModUri || item.isGoDir)) {
+          child.isGoDir = true;
+          child.iconPath = icon('go-folder.svg');
+        }
+        return child;
+      })
       .sort((left, right) => right.collapsibleState - left.collapsibleState || left.label.localeCompare(right.label));
     if (item.csprojUri) {
       const depsNode = await buildCsprojDependenciesNode(item.csprojUri, item.id);
       if (depsNode) return [depsNode, ...fsChildren];
+    }
+    if (item.goModUri) {
+      const extLibsNode = await buildGoExternalLibrariesNode(item.goModUri, item.id, item.goModInfo);
+      if (extLibsNode) return [...fsChildren, extLibsNode];
     }
     return fsChildren;
   }
@@ -74,19 +99,29 @@ async function children(item) {
   }
   const projects = new Map();
   const solutions = [];
+  const goModules = [];
   const roots = [];
   const toolGroups = new Map();
   for (const marker of markers) {
     const folder = marker.with({ path: path.dirname(marker.path) });
     const name = path.basename(marker.path);
     const suffix = path.extname(name);
-    const label = name === 'go.mod' ? path.basename(folder.path) : name;
+    const label = name === 'go.mod'
+      ? path.basename(folder.path)
+      : /\.(?:slnx?|csproj|fsproj|vbproj)$/i.test(name)
+        ? path.basename(name, suffix)
+        : name;
     const item = node(folder, true, label, suffix !== '.sln' && suffix !== '.slnx');
     item.id = marker.toString();
     item.launchNames = launchNames.get(item.id);
     if (item.launchNames && !item.contextValue) item.contextValue = 'polyglotProject';
     item.tooltip = vscode.workspace.asRelativePath(marker, true);
     if (name === 'go.mod') {
+      item.goModUri = marker;
+      item.isGoDir = true;
+      item.contextValue = 'polyglotGoModule';
+      item.iconPath = icon('go-module.svg');
+      goModules.push({ marker, item, label });
       const workspace = vscode.workspace.getWorkspaceFolder(marker);
       const tools = workspace && vscode.Uri.joinPath(workspace.uri, 'tools');
       if (tools && folder.path.startsWith(`${tools.path}/`)) {
@@ -94,6 +129,7 @@ async function children(item) {
         if (!toolGroups.has(key)) {
           const group = node(tools, true, 'Go · Tools');
           group.id = key;
+          group.iconPath = icon('go-folder.svg');
           group.projects = [];
           toolGroups.set(key, group);
         }
@@ -103,25 +139,43 @@ async function children(item) {
     }
     if (suffix === '.csproj') {
       item.csprojUri = marker;
-      item.iconPath = new vscode.ThemeIcon('file-code');
+      item.contextValue = 'polyglotCsharpProject';
+      item.iconPath = icon('csproj.svg');
       projects.set(item.id, item);
     } else {
       roots.push(item);
-      if (suffix === '.sln' || suffix === '.slnx') solutions.push({ marker, item, suffix });
+      if (suffix === '.sln' || suffix === '.slnx') {
+        item.solutionUri = marker;
+        item.contextValue = 'polyglotCsharpSolution';
+        solutions.push({ marker, item, suffix });
+      }
     }
   }
   const grouped = new Set();
-  await Promise.all(solutions.map(async ({ marker, item, suffix }) => {
-    const source = new TextDecoder().decode(await vscode.workspace.fs.readFile(marker));
-    const parsed = suffix === '.sln' ? parseSln(source) : parseSlnx(source);
-    item.iconPath = new vscode.ThemeIcon('project');
-    item.projects = buildSolutionTreeNodes(parsed, item.uri, item.id, {
-      makeNode: node,
-      launchNames,
-      groupedProjects: grouped
-    });
-    if (!item.projects.length) delete item.projects;
-  }));
+  await Promise.all([
+    ...solutions.map(async ({ marker, item, suffix }) => {
+      const source = new TextDecoder().decode(await vscode.workspace.fs.readFile(marker));
+      const parsed = suffix === '.sln' ? parseSln(source) : parseSlnx(source);
+      item.iconPath = icon('sln.svg');
+      item.projects = buildSolutionTreeNodes(parsed, item.uri, item.id, {
+        makeNode: node,
+        launchNames,
+        groupedProjects: grouped
+      });
+      if (!item.projects.length) delete item.projects;
+    }),
+    ...goModules.map(async ({ marker, item, label }) => {
+      const info = await readGoModInfo(marker);
+      if (!info) return;
+      item.goModInfo = info;
+      const desc = formatGoModuleDescription(info, label);
+      if (desc) item.description = desc;
+      const tipParts = [vscode.workspace.asRelativePath(marker, true)];
+      if (info.modulePath) tipParts.push(`module ${info.modulePath}`);
+      if (info.goVersion) tipParts.push(`go ${info.goVersion}`);
+      item.tooltip = tipParts.join('\n');
+    })
+  ]);
   roots.push(...[...projects.values()].filter(project => !grouped.has(project.id)));
   const compare = (left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id);
   const groups = [...toolGroups.values()];
@@ -178,6 +232,33 @@ async function runCode(item) {
   await vscode.commands.executeCommand('code-runner.run', item.uri);
 }
 
+let dotnetTerminal;
+let goTerminal;
+
+function runDotnet(item, args) {
+  const target = item?.csprojUri || item?.solutionUri;
+  if (!target) return;
+  if (!dotnetTerminal || dotnetTerminal.exitStatus !== undefined) {
+    dotnetTerminal = vscode.window.createTerminal('DotNet');
+  }
+  dotnetTerminal.show(true);
+  dotnetTerminal.sendText(`dotnet ${args} "${target.fsPath}"`);
+}
+
+function runGo(item, args) {
+  const cwd = item?.goModUri
+    ? nodePath.dirname(item.goModUri.fsPath)
+    : item?.uri
+      ? nodePath.dirname(item.uri.fsPath)
+      : null;
+  if (!cwd) return;
+  if (!goTerminal || goTerminal.exitStatus !== undefined) {
+    goTerminal = vscode.window.createTerminal('Go');
+  }
+  goTerminal.show(true);
+  goTerminal.sendText(`cd "${cwd}" && go ${args}`);
+}
+
 function activate(context) {
   const changes = new vscode.EventEmitter();
   const refresh = () => changes.fire(undefined);
@@ -189,7 +270,18 @@ function activate(context) {
     vscode.commands.registerCommand('polyglotProjects.refresh', refresh),
     vscode.commands.registerCommand('polyglotProjects.runCode', runCode),
     vscode.commands.registerCommand('polyglotProjects.run', item => launch(item, true)),
-    vscode.commands.registerCommand('polyglotProjects.debug', item => launch(item, false)));
+    vscode.commands.registerCommand('polyglotProjects.debug', item => launch(item, false)),
+    vscode.commands.registerCommand('polyglotProjects.dotnetBuild', item => runDotnet(item, 'build')),
+    vscode.commands.registerCommand('polyglotProjects.dotnetRebuild', item => runDotnet(item, 'build --no-incremental')),
+    vscode.commands.registerCommand('polyglotProjects.dotnetClean', item => runDotnet(item, 'clean')),
+    vscode.commands.registerCommand('polyglotProjects.dotnetRestore', item => runDotnet(item, 'restore')),
+    vscode.commands.registerCommand('polyglotProjects.dotnetTest', item => runDotnet(item, 'test')),
+    vscode.commands.registerCommand('polyglotProjects.dotnetPublish', item => runDotnet(item, 'publish')),
+    vscode.commands.registerCommand('polyglotProjects.goBuild', item => runGo(item, 'build ./...')),
+    vscode.commands.registerCommand('polyglotProjects.goTest', item => runGo(item, 'test ./...')),
+    vscode.commands.registerCommand('polyglotProjects.goTestPkg', item => runGo(item, 'test -v .')),
+    vscode.commands.registerCommand('polyglotProjects.goVet', item => runGo(item, 'vet ./...')),
+    vscode.commands.registerCommand('polyglotProjects.goModTidy', item => runGo(item, 'mod tidy')));
 }
 
 module.exports = { activate };
